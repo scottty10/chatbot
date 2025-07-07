@@ -13,6 +13,24 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+from openai import OpenAI
+
+@app.post("/query")
+async def ask_question(request: Request):
+    data = await request.json()
+    query = data.get("query")
+    pdf_text = data.get("pdf_text", "")
+
+    prompt = f"""You are a PDF Assistant. Answer the question based only on the following PDF content:\n\n{pdf_text}\n\nQuestion: {query}"""
+
+    # Use Gemini API (OpenRouter or Google)
+    response = openai.chat.completions.create(
+        model="gpt-4",  # or gemini-2.0-flash via OpenRouter
+        messages=[{"role": "user", "content": prompt}]
+    )
+
+    return {"answer": response.choices[0].message.content}
+
 
 @app.post("/upload")
 async def upload_pdf(file: UploadFile = File(...)):
