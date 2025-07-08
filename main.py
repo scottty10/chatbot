@@ -4,25 +4,29 @@ import fitz  # PyMuPDF
 import uvicorn
 import os
 import uuid
+from datetime import datetime
+import httpx
 import google.generativeai as genai
 
 app = FastAPI()
 
+# CORS middleware (update allow_origins in production)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Use specific domain in production
+    allow_origins=["*"],
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
+# Configure Gemini API
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY") or "your-google-api-key"
 genai.configure(api_key=GOOGLE_API_KEY)
-
 model = genai.GenerativeModel("gemini-2.0-flash")
 
-# Store session memory and PDF text
+# Session memory
 sessions = {}
 
+# Upload PDF route
 @app.post("/upload")
 async def upload_pdf(file: UploadFile = File(...)):
     try:
@@ -35,27 +39,34 @@ async def upload_pdf(file: UploadFile = File(...)):
                 break
         doc.close()
 
-        # Generate session ID
+        # Create session
         session_id = str(uuid.uuid4())
-
-        # Create a chat session with history
         chat = model.start_chat(history=[])
 
-        # Save session
+        # Store session
         sessions[session_id] = {
             "pdf_text": full_text,
             "chat": chat
         }
 
-        return {"status": "success", "session_id": session_id}
+        return {
+            "status": "success",
+            "session_id": session_id
+        }
     except Exception as e:
-        return {"status": "error", "message": str(e)}
+        return {
+            "status": "error",
+            "message": str(e)
+        }
 
+# Ask question route
 @app.post("/query")
 async def ask_question(request: Request):
     data = await request.json()
     session_id = data.get("session_id")
     query = data.get("query")
+    user_email = data.get("user_email", "guest")
+    pdf_file_name = data.get("pdf_file_name", "Unknown")
 
     if session_id not in sessions:
         return {"answer": "❌ Session not found. Please upload the PDF again."}
@@ -67,9 +78,27 @@ async def ask_question(request: Request):
 
     try:
         response = chat.send_message(prompt)
-        return {"answer": response.text}
+        answer = response.text
     except Exception as e:
-        return {"answer": f"❌ Error from Gemini: {str(e)}"}
+        answer = f"❌ Error from Gemini: {str(e)}"
 
+    # Log to external system (n8n webhook)
+    log_payload = {
+        "timestamp": datetime.utcnow().isoformat(),
+        "user_email": user_email,
+        "pdf_file_name": pdf_file_name,
+        "query": query,
+        "answer": answer,
+        "status": "answered" if not answer.startswith("❌") else "error"
+    }
+
+    try:
+        await httpx.post("https://n8n.yourdomain.com/webhook/pdf-logs", json=log_payload)
+    except Exception as log_error:
+        print(f"❌ Log error: {str(log_error)}")
+
+    return {"answer": answer}
+
+# Local dev only
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000)
