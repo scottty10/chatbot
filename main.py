@@ -93,7 +93,7 @@ async def ask_question(request: Request):
     }
 
     try:
-        await httpx.post("https://gojo3110.app.n8n.cloud/webhook-test/chatbot_logs", json=log_payload)
+        await httpx.post("https://gojo3110.app.n8n.cloud/webhook/chatbot_logs", json=log_payload)
     except Exception as log_error:
         print(f"❌ Log error: {str(log_error)}")
 
